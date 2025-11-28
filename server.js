@@ -1,13 +1,19 @@
 const express = require("express");
 const { google } = require("googleapis");
 const app = express();
-
 app.use(express.json());
 
-// Cấu hình Google Sheets từ biến môi trường
-// Trên Render bạn tạo ENV: GOOGLE_SERVICE_ACCOUNT = toàn bộ JSON của service account
-const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT);
+// Lấy credentials từ ENV an toàn
+let credentials;
+try {
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT) throw new Error("GOOGLE_SERVICE_ACCOUNT chưa set");
+  credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT);
+} catch (err) {
+  console.error("Lỗi lấy GOOGLE_SERVICE_ACCOUNT:", err.message);
+  process.exit(1); // dừng server nếu chưa có ENV
+}
 
+// Tạo auth Google Sheets
 const auth = new google.auth.GoogleAuth({
   credentials,
   scopes: ["https://www.googleapis.com/auth/spreadsheets"]
@@ -17,6 +23,7 @@ const sheets = google.sheets({ version: "v4", auth });
 
 // Hàm chuẩn hóa số điện thoại
 function extractPhone(comment) {
+  if (!comment) return null;
   let full = comment.match(/(03|05|07|08|09)[0-9]{8}/);
   if (full) return full[0];
 
@@ -34,7 +41,7 @@ function getMonthlySheetName() {
   const now = new Date();
   const year = now.getFullYear();
   const month = (now.getMonth() + 1).toString().padStart(2, "0");
-  return `data_${year}${month}`; // Ví dụ: data_202511
+  return `data_${year}${month}`;
 }
 
 // Webhook nhận từ Pancake
@@ -50,9 +57,14 @@ app.post("/webhook", async (req, res) => {
 
     const monthSheetName = getMonthlySheetName();
 
+    if (!process.env.SPREADSHEET_ID) {
+      console.error("SPREADSHEET_ID chưa set trong ENV");
+      return res.sendStatus(500);
+    }
+
     // Thêm dữ liệu vào Google Sheets
     await sheets.spreadsheets.values.append({
-      spreadsheetId: process.env.SPREADSHEET_ID, // Tạo ENV SPREADSHEET_ID = ID sheet chính
+      spreadsheetId: process.env.SPREADSHEET_ID,
       range: `${monthSheetName}!A:E`,
       valueInputOption: "RAW",
       requestBody: {
@@ -64,12 +76,13 @@ app.post("/webhook", async (req, res) => {
     res.sendStatus(200);
 
   } catch (err) {
-    console.error(err);
+    console.error("Lỗi webhook:", err);
     res.sendStatus(500);
   }
 });
 
+// Route test
 app.get("/", (req, res) => res.send("Pancake Webhook đang chạy!"));
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log("Server webhook chạy port", PORT));
+app.listen(PORT, () => console.log(`Server webhook chạy port ${PORT}`));
