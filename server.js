@@ -77,7 +77,7 @@ app.post("/webhook", async (req, res) => {
     const { name, page_customer } = req.body;
     if (!page_customer) return res.sendStatus(200);
 
-    const psid = page_customer.psid;
+    const page_id = page_customer.page_id;
     const phone = page_customer?.recent_phone_numbers?.[0]?.phone_number || null;
     if (!phone) return res.sendStatus(200);
 
@@ -93,13 +93,13 @@ app.post("/webhook", async (req, res) => {
       const monthSheet = getMonthlySheetName(firstCommentTime);
       await ensureSheetExists(process.env.SPREADSHEET_ID, monthSheet);
 
-      // Kiểm tra trùng lặp psid + postId
+      // Kiểm tra trùng lặp page_id + postId
       const rangeCheck = await sheets.spreadsheets.values.get({
         spreadsheetId: process.env.SPREADSHEET_ID,
         range: `${monthSheet}!A:B`
       });
       const rows = rangeCheck.data.values || [];
-      if (rows.some(r => r[0] === psid && r[1] === postId)) continue;
+      if (rows.some(r => r[0] === page_id && r[1] === postId)) continue;
 
       // Ghi dữ liệu
       await sheets.spreadsheets.values.append({
@@ -108,7 +108,7 @@ app.post("/webhook", async (req, res) => {
         valueInputOption: "RAW",
         requestBody: {
           values: [[
-            psid, postId, pageTitle, name, phone, formatTimeVN(firstCommentTime)
+            page_id, postId, pageTitle, name, phone, formatTimeVN(firstCommentTime)
           ]]
         }
       });
@@ -128,3 +128,4 @@ app.get("/", (req, res) => res.send("Webhook Pancake đang chạy!"));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server chạy port ${PORT}`));
+
