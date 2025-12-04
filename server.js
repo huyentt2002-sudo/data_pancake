@@ -19,7 +19,6 @@ const auth = new google.auth.GoogleAuth({
 
 const sheets = google.sheets({ version: "v4", auth });
 
-
 // ==== HÀM EXTRACT PHONE ====
 function extractPhone(text) {
   if (!text) return null;
@@ -33,20 +32,17 @@ function extractPhone(text) {
   return null;
 }
 
-
-// ==== TẠO TÊN SHEET THEO THÁNG CỦA COMMENT ĐẦU TIÊN ====
+// ==== TẠO TÊN SHEET THEO THÁNG ====
 function getMonthlySheetName(firstCommentTime) {
   const d = new Date(firstCommentTime);
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, "0");
-  return `data_${year}${month}`;  // Ví dụ: data_202512
+  return `data_${year}${month}`;
 }
 
-
-// ==== CHECK SHEET TỒN TẠI → NẾU CHƯA THÌ TẠO ====
+// ==== CHECK SHEET TỒN TẠI → TẠO NẾU CHƯA CÓ ====
 async function ensureSheetExists(sheetId, sheetName) {
   const list = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
-
   const exists = list.data.sheets.some(s => s.properties.title === sheetName);
 
   if (!exists) {
@@ -59,7 +55,7 @@ async function ensureSheetExists(sheetId, sheetName) {
             addSheet: {
               properties: {
                 title: sheetName,
-                gridProperties: { rowCount: 2000, columnCount: 20 }
+                gridProperties: { rowCount: 2000, columnCount: 10 }
               }
             }
           }
@@ -69,50 +65,67 @@ async function ensureSheetExists(sheetId, sheetName) {
   }
 }
 
-
-
 // ==== WEBHOOK ====
 app.post("/webhook", async (req, res) => {
   try {
-    console.log("📥 Webhook nhận:", JSON.stringify(req.body, null, 2));
+    const { name, page_customer } = req.body;
+    const psid = page_customer?.psid;
+    const pageId = page_customer?.id;
+    const firstCommentTime = page_customer?.activities?.[0]?.inserted_at;
 
-    const { name, message, page, time, first_comment_time } = req.body;
-
-    const phone = extractPhone(message);
-
-    if (!phone) {
-      console.log(`⚠️ Không thấy số điện thoại trong comment của ${name}`);
+    if (!firstCommentTime) {
+      console.log(`⚠️ Không có thời điểm bình luận đầu tiên của ${name}`);
       return res.sendStatus(200);
     }
 
-    // === LẤY THÁNG CỦA COMMENT ĐẦU TIÊN ===
-    const monthSheet = getMonthlySheetName(first_comment_time);
+    // Nếu khách chưa có SĐT thì bỏ qua
+    const phone = page_customer?.recent_phone_numbers?.[0] || null;
+    if (!phone) {
+      console.log(`⚠️ Chưa có số điện thoại của ${name}`);
+      return res.sendStatus(200);
+    }
+
+    // Tên sheet theo tháng
+    const monthSheet = getMonthlySheetName(firstCommentTime);
 
     if (!process.env.SPREADSHEET_ID) {
       console.error("SPREADSHEET_ID chưa set");
       return res.sendStatus(500);
     }
 
-    // === TẠO SHEET NẾU CHƯA CÓ ===
+    // Tạo sheet nếu chưa tồn tại
     await ensureSheetExists(process.env.SPREADSHEET_ID, monthSheet);
 
-    // === GHI DỮ LIỆU ===
+    // ==== KIỂM TRA TRÙNG LẶP (psid + post_id) ====
+    const rangeCheck = await sheets.spreadsheets.values.get({
+      spreadsheetId: process.env.SPREADSHEET_ID,
+      range: `${monthSheet}!A:C`
+    });
+    const rows = rangeCheck.data.values || [];
+    const exists = rows.some(r => r[0] === psid && r[1] === pageId);
+
+    if (exists) {
+      console.log(`⏩ ${name} đã tồn tại trong bài viết này → không thêm`);
+      return res.sendStatus(200);
+    }
+
+    // ==== GHI DỮ LIỆU ====
     await sheets.spreadsheets.values.append({
       spreadsheetId: process.env.SPREADSHEET_ID,
       range: `${monthSheet}!A:E`,
       valueInputOption: "RAW",
       requestBody: {
         values: [[
-          name,
-          phone,
-          page,
-          message,
-          time || new Date().toISOString()
+          psid,         // cột A: PSID khách
+          pageId,       // cột B: ID bài viết
+          name,         // cột C: Tên khách
+          phone,        // cột D: SĐT
+          firstCommentTime // cột E: thời điểm bình luận đầu tiên
         ]]
       }
     });
 
-    console.log(`✅ Đã lưu: ${name} - ${phone} - ${page} → sheet ${monthSheet}`);
+    console.log(`✅ Đã lưu: ${name} - ${phone} → sheet ${monthSheet}`);
     res.sendStatus(200);
 
   } catch (err) {
@@ -121,9 +134,7 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
+app.get("/", (req, res) => res.send("Webhook Pancake đang chạy!"));
 
-app.get("/", (req, res) => res.send("Pancake Webhook đang chạy!"));
-
-// Server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server chạy port ${PORT}`));
