@@ -47,7 +47,7 @@ function getMonthlySheetName() {
 // Webhook nhận từ Pancake
 app.post("/webhook", async (req, res) => {
   try {
-    const { message, name, page, time } = req.body;
+    console.log("Webhook nhận:", JSON.stringify(req.body, null, 2));
     const phone = extractPhone(message);
 
     if (!phone) {
@@ -86,3 +86,4 @@ app.get("/", (req, res) => res.send("Pancake Webhook đang chạy!"));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server webhook chạy port ${PORT}`));
+
