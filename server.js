@@ -3,17 +3,15 @@ const { google } = require("googleapis");
 const app = express();
 app.use(express.json());
 
-// Lấy credentials từ ENV an toàn
+// ==== GOOGLE AUTH ====
 let credentials;
 try {
-  if (!process.env.GOOGLE_SERVICE_ACCOUNT) throw new Error("GOOGLE_SERVICE_ACCOUNT chưa set");
   credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT);
 } catch (err) {
-  console.error("Lỗi lấy GOOGLE_SERVICE_ACCOUNT:", err.message);
-  process.exit(1); // dừng server nếu chưa có ENV
+  console.error("Lỗi GOOGLE_SERVICE_ACCOUNT:", err.message);
+  process.exit(1);
 }
 
-// Tạo auth Google Sheets
 const auth = new google.auth.GoogleAuth({
   credentials,
   scopes: ["https://www.googleapis.com/auth/spreadsheets"]
@@ -21,70 +19,111 @@ const auth = new google.auth.GoogleAuth({
 
 const sheets = google.sheets({ version: "v4", auth });
 
-// Hàm chuẩn hóa số điện thoại
-function extractPhone(comment) {
-  if (!comment) return null;
-  let match = comment.match(/(\+?84)?0?([3|5|7|8|9][0-9]{8})/);
-  if (full) return full[0];
 
-  let intl = comment.match(/(\+?84)[0-9]{9}/);
-  if (intl) return "0" + intl[0].replace("+84", "");
+// ==== HÀM EXTRACT PHONE ====
+function extractPhone(text) {
+  if (!text) return null;
 
-  let nine = comment.match(/[0-9]{9}/);
-  if (nine) return "0" + nine[0];
+  let m1 = text.match(/(\+84|84|0)(3|5|7|8|9)\d{8}/);
+  if (m1) return "0" + m1[0].replace("+84", "").replace(/^84/, "").replace(/^0/, "");
+
+  let m2 = text.match(/\d{9}/);
+  if (m2) return "0" + m2[0];
 
   return null;
 }
 
-// Hàm lấy tên sheet theo tháng
-function getMonthlySheetName() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = (now.getMonth() + 1).toString().padStart(2, "0");
-  return `data_${year}${month}`;
+
+// ==== TẠO TÊN SHEET THEO THÁNG CỦA COMMENT ĐẦU TIÊN ====
+function getMonthlySheetName(firstCommentTime) {
+  const d = new Date(firstCommentTime);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  return `data_${year}${month}`;  // Ví dụ: data_202512
 }
 
-// Webhook nhận từ Pancake
+
+// ==== CHECK SHEET TỒN TẠI → NẾU CHƯA THÌ TẠO ====
+async function ensureSheetExists(sheetId, sheetName) {
+  const list = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
+
+  const exists = list.data.sheets.some(s => s.properties.title === sheetName);
+
+  if (!exists) {
+    console.log(`➡️ Tạo sheet mới: ${sheetName}`);
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: sheetId,
+      requestBody: {
+        requests: [
+          {
+            addSheet: {
+              properties: {
+                title: sheetName,
+                gridProperties: { rowCount: 2000, columnCount: 20 }
+              }
+            }
+          }
+        ]
+      }
+    });
+  }
+}
+
+
+
+// ==== WEBHOOK ====
 app.post("/webhook", async (req, res) => {
   try {
-    console.log("Webhook nhận:", JSON.stringify(req.body, null, 2));
+    console.log("📥 Webhook nhận:", JSON.stringify(req.body, null, 2));
+
+    const { name, message, page, time, first_comment_time } = req.body;
+
     const phone = extractPhone(message);
 
     if (!phone) {
-      console.log(`Không tìm thấy số trong comment của ${name}`);
+      console.log(`⚠️ Không thấy số điện thoại trong comment của ${name}`);
       return res.sendStatus(200);
     }
 
-    const monthSheetName = getMonthlySheetName();
+    // === LẤY THÁNG CỦA COMMENT ĐẦU TIÊN ===
+    const monthSheet = getMonthlySheetName(first_comment_time);
 
     if (!process.env.SPREADSHEET_ID) {
-      console.error("SPREADSHEET_ID chưa set trong ENV");
+      console.error("SPREADSHEET_ID chưa set");
       return res.sendStatus(500);
     }
 
-    // Thêm dữ liệu vào Google Sheets
+    // === TẠO SHEET NẾU CHƯA CÓ ===
+    await ensureSheetExists(process.env.SPREADSHEET_ID, monthSheet);
+
+    // === GHI DỮ LIỆU ===
     await sheets.spreadsheets.values.append({
       spreadsheetId: process.env.SPREADSHEET_ID,
-      range: `${monthSheetName}!A:E`,
+      range: `${monthSheet}!A:E`,
       valueInputOption: "RAW",
       requestBody: {
-        values: [[name, phone, page, message, time || new Date().toISOString()]]
+        values: [[
+          name,
+          phone,
+          page,
+          message,
+          time || new Date().toISOString()
+        ]]
       }
     });
 
-    console.log(`Đã lưu: ${name} - ${phone} - ${page} vào ${monthSheetName}`);
+    console.log(`✅ Đã lưu: ${name} - ${phone} - ${page} → sheet ${monthSheet}`);
     res.sendStatus(200);
 
   } catch (err) {
-    console.error("Lỗi webhook:", err);
+    console.error("❌ Lỗi webhook:", err);
     res.sendStatus(500);
   }
 });
 
-// Route test
+
 app.get("/", (req, res) => res.send("Pancake Webhook đang chạy!"));
 
+// Server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server webhook chạy port ${PORT}`));
-
-
+app.listen(PORT, () => console.log(`🚀 Server chạy port ${PORT}`));
