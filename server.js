@@ -24,7 +24,7 @@ const sheets = google.sheets({ version: "v4", auth });
 // Hàm chuẩn hóa số điện thoại
 function extractPhone(comment) {
   if (!comment) return null;
-  let full = comment.match(/(03|05|07|08|09)[0-9]{8}/);
+  let match = comment.match(/(\+?84)?0?([3|5|7|8|9][0-9]{8})/);
   if (full) return full[0];
 
   let intl = comment.match(/(\+?84)[0-9]{9}/);
@@ -86,4 +86,5 @@ app.get("/", (req, res) => res.send("Pancake Webhook đang chạy!"));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server webhook chạy port ${PORT}`));
+
 
