@@ -74,6 +74,7 @@ async function ensureSheetExists(sheetId, sheetName) {
 // ==== WEBHOOK ====
 app.post("/webhook", async (req, res) => {
   try {
+    console.log("📥 Webhook nhận:", JSON.stringify(req.body, null, 2));
     const { name, page_customer } = req.body;
     const psid = page_customer?.psid;
     const pageId = page_customer?.id;
@@ -147,4 +148,5 @@ app.get("/", (req, res) => res.send("Webhook Pancake đang chạy!"));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server chạy port ${PORT}`));
+
 
