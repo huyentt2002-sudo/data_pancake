@@ -5,11 +5,14 @@ app.use(express.json());
 
 // ==== GOOGLE AUTH ====
 let credentials;
-try {
-  credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT);
-} catch (err) {
-  console.error("Lỗi GOOGLE_SERVICE_ACCOUNT:", err.message);
-  process.exit(1);
+if (!process.env.GOOGLE_SERVICE_ACCOUNT) {
+  console.error("❌ GOOGLE_SERVICE_ACCOUNT chưa set!");
+} else {
+  try {
+    credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT);
+  } catch (err) {
+    console.error("❌ Lỗi parse GOOGLE_SERVICE_ACCOUNT:", err.message);
+  }
 }
 
 const auth = new google.auth.GoogleAuth({
@@ -19,26 +22,13 @@ const auth = new google.auth.GoogleAuth({
 
 const sheets = google.sheets({ version: "v4", auth });
 
-// ==== HÀM EXTRACT PHONE ====
-function extractPhone(text) {
-  if (!text) return null;
-
-  let m1 = text.match(/(\+84|84|0)(3|5|7|8|9)\d{8}/);
-  if (m1) return "0" + m1[0].replace("+84", "").replace(/^84/, "").replace(/^0/, "");
-
-  let m2 = text.match(/\d{9}/);
-  if (m2) return "0" + m2[0];
-
-  return null;
-}
-
 // ==== HÀM CHUYỂN ISO -> GIỜ VIỆT NAM ====
 function formatTimeVN(isoString) {
   if (!isoString) return null;
   return new Date(isoString).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
 }
 
-// ==== TẠO TÊN SHEET THEO THÁNG ==== (dựa trên thời gian comment đầu tiên)
+// ==== TẠO TÊN SHEET THEO THÁNG ====
 function getMonthlySheetName(firstCommentTime) {
   const d = new Date(firstCommentTime);
   const year = d.getFullYear();
@@ -48,26 +38,34 @@ function getMonthlySheetName(firstCommentTime) {
 
 // ==== CHECK SHEET TỒN TẠI → TẠO NẾU CHƯA CÓ ====
 async function ensureSheetExists(sheetId, sheetName) {
-  const list = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
-  const exists = list.data.sheets.some(s => s.properties.title === sheetName);
+  if (!sheetId) {
+    console.error("❌ SPREADSHEET_ID chưa set!");
+    return;
+  }
+  try {
+    const list = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
+    const exists = list.data.sheets.some(s => s.properties.title === sheetName);
 
-  if (!exists) {
-    console.log(`➡️ Tạo sheet mới: ${sheetName}`);
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: sheetId,
-      requestBody: {
-        requests: [
-          {
-            addSheet: {
-              properties: {
-                title: sheetName,
-                gridProperties: { rowCount: 2000, columnCount: 10 }
+    if (!exists) {
+      console.log(`➡️ Tạo sheet mới: ${sheetName}`);
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: sheetId,
+        requestBody: {
+          requests: [
+            {
+              addSheet: {
+                properties: {
+                  title: sheetName,
+                  gridProperties: { rowCount: 2000, columnCount: 10 }
+                }
               }
             }
-          }
-        ]
-      }
-    });
+          ]
+        }
+      });
+    }
+  } catch (err) {
+    console.error("❌ Lỗi ensureSheetExists:", err.message);
   }
 }
 
@@ -90,33 +88,27 @@ app.post("/webhook", async (req, res) => {
       const postId = act.post_id;
       const pageTitle = act.attachments?.data?.[0]?.title || "Unknown";
       const firstCommentTime = act.inserted_at;
+      if (!firstCommentTime) continue;
 
-      // Tên sheet theo tháng của comment đầu tiên
       const monthSheet = getMonthlySheetName(firstCommentTime);
       await ensureSheetExists(process.env.SPREADSHEET_ID, monthSheet);
 
       // Kiểm tra trùng lặp psid + postId
       const rangeCheck = await sheets.spreadsheets.values.get({
         spreadsheetId: process.env.SPREADSHEET_ID,
-        range: `${monthSheet}!A:C`
+        range: `${monthSheet}!A:B`
       });
       const rows = rangeCheck.data.values || [];
-      const exists = rows.some(r => r[0] === psid && r[1] === postId);
-      if (exists) continue;
+      if (rows.some(r => r[0] === psid && r[1] === postId)) continue;
 
-      // Ghi dữ liệu vào sheet
+      // Ghi dữ liệu
       await sheets.spreadsheets.values.append({
         spreadsheetId: process.env.SPREADSHEET_ID,
         range: `${monthSheet}!A:F`,
         valueInputOption: "RAW",
         requestBody: {
           values: [[
-            psid,            // A: PSID
-            postId,          // B: ID bài viết
-            pageTitle,       // C: Tên page
-            name,            // D: Tên khách
-            phone,           // E: SĐT
-            formatTimeVN(firstCommentTime) // F: thời gian comment đầu tiên (VN)
+            psid, postId, pageTitle, name, phone, formatTimeVN(firstCommentTime)
           ]]
         }
       });
@@ -131,3 +123,8 @@ app.post("/webhook", async (req, res) => {
     res.sendStatus(500);
   }
 });
+
+app.get("/", (req, res) => res.send("Webhook Pancake đang chạy!"));
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`🚀 Server chạy port ${PORT}`));
