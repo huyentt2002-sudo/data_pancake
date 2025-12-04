@@ -85,7 +85,7 @@ app.post("/webhook", async (req, res) => {
     }
 
     // Nếu khách chưa có SĐT thì bỏ qua
-    const phone = page_customer?.recent_phone_numbers?.[0] || null;
+    const phone = page_customer?.recent_phone_numbers?.[0]?.phone_number || null;
     if (!phone) {
       console.log(`⚠️ Chưa có số điện thoại của ${name}`);
       return res.sendStatus(200);
@@ -147,3 +147,4 @@ app.get("/", (req, res) => res.send("Webhook Pancake đang chạy!"));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server chạy port ${PORT}`));
+
