@@ -74,55 +74,68 @@ async function ensureSheetExists(sheetId, sheetName) {
 // ==== WEBHOOK ====
 app.post("/webhook", async (req, res) => {
   try {
+    // ==== In log dữ liệu webhook nhận về ====
     console.log("📥 Webhook nhận:", JSON.stringify(req.body, null, 2));
 
     const { name, page_customer } = req.body;
     if (!page_customer) return res.sendStatus(200);
 
+    // Lấy PSID khách
     const psid = page_customer.psid;
-    const phone = page_customer?.recent_phone_numbers?.[0]?.phone_number || null;
+    if (!psid) return res.sendStatus(200);
+
+    // Lấy SĐT, fallback nếu cần
+    const phoneObj = page_customer?.recent_phone_numbers?.[0] || {};
+    const phone = phoneObj.phone_number || phoneObj.captured || null;
     if (!phone) {
       console.log(`⚠️ Chưa có số điện thoại của ${name}`);
       return res.sendStatus(200);
     }
 
+    // Lấy activities
     const activities = page_customer.activities || [];
     if (!activities.length) return res.sendStatus(200);
 
-    for (let act of activities) {
-      const postId = act.post_id;
-      const pageTitle = act.attachments?.data?.[0]?.title || "Unknown";
-      const firstCommentTime = act.inserted_at;
+    if (!process.env.SPREADSHEET_ID) {
+      console.error("❌ SPREADSHEET_ID chưa set");
+      return res.sendStatus(500);
+    }
 
+    for (let act of activities) {
+      const postId = act.post_id || "UnknownPost";
+      const pageTitle = act.attachments?.data?.[0]?.title || "UnknownPage";
+      const firstCommentTime = act.inserted_at;
       if (!firstCommentTime) continue;
 
-      const firstCommentTimeVN = formatTimeVN(firstCommentTime);
+      const firstCommentTimeVN = formatTimeVN(firstCommentTime) || "";
+
       const monthSheet = getMonthlySheetName(firstCommentTime);
 
+      // Tạo sheet nếu chưa tồn tại
       await ensureSheetExists(process.env.SPREADSHEET_ID, monthSheet);
 
-      // Kiểm tra trùng lặp psid + postId
+      // Kiểm tra trùng lặp PSID + postId
       const rangeCheck = await sheets.spreadsheets.values.get({
         spreadsheetId: process.env.SPREADSHEET_ID,
-        range: `${monthSheet}!A:B` // cột A: PSID, cột B: postId
+        range: `${monthSheet}!A:B`
       });
       const rows = rangeCheck.data.values || [];
       const exists = rows.some(r => r[0] === psid && r[1] === postId);
       if (exists) continue;
 
-      // Ghi dữ liệu vào Google Sheet
+      // Ghi dữ liệu vào Google Sheet, ép tất cả về string
       await sheets.spreadsheets.values.append({
         spreadsheetId: process.env.SPREADSHEET_ID,
         range: `${monthSheet}!A:F`,
         valueInputOption: "RAW",
         requestBody: {
           values: [[
-            psid,            // A: PSID
-            postId,          // B: ID bài viết
-            pageTitle,       // C: Tên page
-            name,            // D: Tên khách
-            phone,           // E: SĐT
-            firstCommentTimeVN // F: thời gian comment đầu tiên (VN)
+            String(psid),            // A: PSID
+            String(postId),          // B: ID bài viết
+            String(pageTitle),       // C: Tên page
+            String(name),            // D: Tên khách
+            String(phone),           // E: SĐT
+            String(firstCommentTimeVN) // F: thời gian comment đầu tiên (VN)
           ]]
         }
       });
