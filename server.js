@@ -32,7 +32,13 @@ function extractPhone(text) {
   return null;
 }
 
-// ==== TẠO TÊN SHEET THEO THÁNG ====
+// ==== HÀM CHUYỂN ISO -> GIỜ VIỆT NAM ====
+function formatTimeVN(isoString) {
+  if (!isoString) return null;
+  return new Date(isoString).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
+}
+
+// ==== TẠO TÊN SHEET THEO THÁNG ==== (dựa trên thời gian comment đầu tiên)
 function getMonthlySheetName(firstCommentTime) {
   const d = new Date(firstCommentTime);
   const year = d.getFullYear();
@@ -85,6 +91,9 @@ app.post("/webhook", async (req, res) => {
       return res.sendStatus(200);
     }
 
+    // Chuyển thời gian sang giờ Việt Nam
+    const firstCommentTimeVN = formatTimeVN(firstCommentTime);
+
     // Tên sheet theo tháng
     const monthSheet = getMonthlySheetName(firstCommentTime);
 
@@ -116,11 +125,11 @@ app.post("/webhook", async (req, res) => {
       valueInputOption: "RAW",
       requestBody: {
         values: [[
-          psid,         // cột A: PSID khách
-          pageId,       // cột B: ID bài viết
-          name,         // cột C: Tên khách
-          phone,        // cột D: SĐT
-          firstCommentTime // cột E: thời điểm bình luận đầu tiên
+          psid,             // cột A: PSID khách
+          pageId,           // cột B: ID bài viết
+          name,             // cột C: Tên khách
+          phone,            // cột D: SĐT
+          firstCommentTimeVN // cột E: thời điểm bình luận đầu tiên giờ VN
         ]]
       }
     });
