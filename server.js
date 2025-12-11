@@ -1,5 +1,6 @@
 const express = require("express");
 const { google } = require("googleapis");
+const axios = require("axios");
 const app = express();
 app.use(express.json());
 
@@ -124,8 +125,16 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
+// ==== ROUTE KIỂM TRA ====
 app.get("/", (req, res) => res.send("Webhook Pancake đang chạy!"));
 
+// ==== KEEP RENDER ALIVE (CÁCH 1) ====
+setInterval(() => {
+  axios.get("https://data-pancake.onrender.com/")
+    .then(() => console.log("⚡ Keep-alive: ping thành công"))
+    .catch(err => console.log("❌ Keep-alive lỗi:", err.message));
+}, 5 * 60 * 1000); // Ping mỗi 5 phút
+
+// ==== START SERVER ====
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server chạy port ${PORT}`));
-
